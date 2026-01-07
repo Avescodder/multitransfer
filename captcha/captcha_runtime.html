@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Yandex Smart Captcha</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        #captcha-container {
+            width: 100%;
+            max-width: 420px;
+        }
+    </style>
+</head>
+<body>
+
+<div
+    id="captcha-container"
+    class="smart-captcha"
+    data-sitekey="ysc1_DAo8nFPdNCMHkAwYxIUJFxW5IIJd3ITGArZehXxO9a0ea6f8"
+></div>
+
+<script>
+    window.__CAPTCHA_TOKEN__ = null;
+
+    window.addEventListener("smartCaptchaSuccess", function (event) {
+        const token = event.detail?.token;
+        if (token) {
+            window.__CAPTCHA_TOKEN__ = token;
+            console.log("CAPTCHA TOKEN:", token);
+        }
+    });
+</script>
+
+<script
+    src="https://smartcaptcha.cloud.yandex.ru/captcha.js"
+    defer
+></script>
+
+</body>
+</html>
