@@ -1,13 +1,5 @@
-"""
-Полный config.py - все настройки в одном месте
-"""
 import random
 from datetime import datetime, timedelta
-
-
-# ============================================
-# БРАУЗЕРНЫЕ НАСТРОЙКИ
-# ============================================
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -25,11 +17,6 @@ TIMEZONES = [
 
 WIDTHS = [1920, 1366, 1536, 1440]
 HEIGHTS = [1080, 768, 864, 900]
-
-
-# ============================================
-# ПЕРСОНАЛЬНЫЕ ДАННЫЕ
-# ============================================
 
 FIRST_NAMES = [
     "ИВАН", "ПЕТР", "СЕРГЕЙ", "АНДРЕЙ", "ДМИТРИЙ",
@@ -61,11 +48,6 @@ def genPhone() -> str:
     """Генерация номера телефона"""
     return f"79{random.randint(100000000, 999999999)}"
 
-
-# ============================================
-# СТРАНЫ И ВАЛЮТЫ
-# ============================================
-
 CARD_COUNTRIES = {
     "TJK": {
         "countryCode": "TJK",
@@ -88,17 +70,7 @@ CARD_COUNTRIES = {
 }
 
 
-# ============================================
-# ГЕНЕРАЦИЯ ДАТ ПАСПОРТОВ
-# ============================================
-
 def generate_passport_dates():
-    """
-    Генерирует реалистичные даты для паспорта
-    birth_date: 18-60 лет назад
-    issue_date: от birth_date+18 лет до сегодня
-    """
-    # Дата рождения: от 18 до 60 лет назад
     years_ago = random.randint(18, 60)
     birth_date = datetime.now() - timedelta(days=years_ago * 365)
     birth_date = birth_date.replace(
@@ -106,7 +78,6 @@ def generate_passport_dates():
         day=random.randint(1, 28)
     )
     
-    # Дата выдачи паспорта: от 18 лет после рождения до сегодня
     min_issue = birth_date + timedelta(days=18 * 365)
     max_issue = datetime.now()
     
@@ -122,5 +93,4 @@ def generate_passport_dates():
     }
 
 
-# Предгенерированные даты (для быстрого доступа)
 DATES_PASSPORT = [generate_passport_dates() for _ in range(20)]

@@ -106,7 +106,7 @@ class FlowRunner:
 
         self.client = httpx.Client(
             headers=headers,
-            proxy=proxy,
+            proxy=proxy if proxy else None,
             timeout=timeout,
             follow_redirects=True,
             limits=httpx.Limits(
@@ -130,7 +130,7 @@ class FlowRunner:
             try:
                 self._execute(step)
                 return
-            except Exception:
+            except Exception as e:
                 attempt += 1
                 if attempt > step.retry:
                     raise
@@ -149,22 +149,11 @@ class FlowRunner:
             params=params,
             json=json_body,
         )
-        print(f"\n[HTTP] {step.name}")
-        print(f"  URL: {url}")
-        print(f"  Method: {step.method}")
-        if json_body:
-            import json as json_lib
-            print(f"  Body: {json_lib.dumps(json_body, ensure_ascii=False, indent=2)[:500]}")
 
-
-        time.sleep(0.15)
-
-        print(f"  Status: {resp.status_code}")
-        if resp.status_code >= 400:
-            print(f"  Error: {resp.text[:500]}")
+        time.sleep(0.1)
 
         if step.expect_status and resp.status_code != step.expect_status:
-            raise RuntimeError(f"{step.name}: {resp.status_code}")
+            raise RuntimeError(f"{step.name}: status {resp.status_code}, expected {step.expect_status}")
 
         resp_json = try_json(resp.text)
 
