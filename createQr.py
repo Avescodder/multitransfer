@@ -138,6 +138,25 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
             expect_status=201,
             extracts=[ExtractRule("transfer_id", "json", "transferId")],
         ),
+        Step(
+            name="Confirm transfer (QR)",
+            method="POST",
+            url="https://api.multitransfer.ru/anonymous/multi/multitransfer-qr-processing/v3/anonymous/confirm",
+            headers={
+                "client-id": "multitransfer-web-id",
+                "content-type": "application/json",
+                "fhpsessionid": session_id,
+                "fhprequestid": str(uuid.uuid4()),
+                "x-request-id": str(uuid.uuid4()),
+                "User-Agent": user_agent,
+            },
+            json_body={
+                "transactionId": "{{transfer_id}}",
+                "recordType": "transfer"
+            },
+            expect_status=200,
+            extracts=[ExtractRule("qr_payload", "json", "externalData.payload")],
+        ),
     ]
     
     runner.run(steps_create)
@@ -146,6 +165,7 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     t3 = time.time()
     print(f"[Step 3] {t3 - t2:.1f}s (total {t3 - start:.1f}s)")
     print(f"[Result] transfer_id={runner.ctx.get('transfer_id')}")
+    print(f"[QR] {runner.ctx.get('qr_payload')}")
     
     return runner.ctx
 
