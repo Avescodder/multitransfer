@@ -48,6 +48,7 @@ class BrowserPool:
             }
         )
 
+
 class CaptchaCache:
     _cache = {}
     _lock = asyncio.Lock()
@@ -81,8 +82,6 @@ async def solve_captcha_fast(captcha_key, proxy_host, proxy_port, proxy_user, pr
     cached = await CaptchaCache.get(captcha_key)
     if cached:
         return cached
-    
-    t_start = time.perf_counter()
     
     html_path = Path("captcha/captcha_runtime.html").absolute()
     write_captcha_html(captcha_key)
@@ -143,9 +142,6 @@ async def solve_captcha_fast(captcha_key, proxy_host, proxy_port, proxy_user, pr
         
         token = result_data.get("spravka")
         
-        elapsed = time.perf_counter() - t_start
-        print(f"[Captcha] Решена за {elapsed:.1f}s")
-        
         if token:
             await CaptchaCache.set(captcha_key, token)
         
@@ -154,10 +150,8 @@ async def solve_captcha_fast(captcha_key, proxy_host, proxy_port, proxy_user, pr
     finally:
         await context.close()
 
+
 async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
-    t_start = time.perf_counter()
-    print(f"[0.0s] createQr (amount={amount})")
-    
     user_agent = random.choice(config.USER_AGENTS)
     session_id = str(uuid.uuid4())
     
@@ -174,8 +168,6 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     country = CARD_COUNTRIES["TJK"]
     sender_details = YamlManage.get_path("api.link_details.sender_details")
     
-    print(f"[{time.perf_counter() - t_start:.2f}s] 📡 Этап 1: Get captcha key")
-    
     steps_init = [
         Step(
             name="Get captcha key",
@@ -191,7 +183,6 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     runner.run(steps_init)
     
     if proxy and "@" in proxy:
-        # http://user:pass@host:port
         parts = proxy.replace("http://", "").replace("https://", "").split("@")
         auth = parts[0].split(":")
         host_port = parts[1].split(":")
@@ -213,7 +204,7 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     )
     
     if not captcha_token:
-        raise RuntimeError("Не удалось решить капчу")
+        raise RuntimeError("Failed to solve captcha")
     
     runner.ctx["captcha_token"] = captcha_token
     
@@ -221,7 +212,7 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     
     steps_create = [
         Step(
-            name="Calc fee",
+            name="Calculate fee",
             method="POST",
             url="https://api.multitransfer.ru/anonymous/multi/multitransfer-fee-calc/v3/commissions",
             headers={
@@ -291,7 +282,7 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
             extracts=[ExtractRule("transfer_id", "json", "transferId")],
         ),
         Step(
-            name="Confirm transfer (QR)",
+            name="Confirm transfer",
             method="POST",
             url="https://api.multitransfer.ru/anonymous/multi/multitransfer-qr-processing/v3/anonymous/confirm",
             headers={
@@ -314,38 +305,19 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     runner.run(steps_create)
     runner.close()
     
-    t3 = time.perf_counter()
-    total = t3 - t_start
-
-    print(f"Успех")
-    print(f"TOTAL: {total:.2f}s")
-    print(f"transfer_id: {runner.ctx.get('transfer_id')}")
-    print(f"QR: {runner.ctx.get('qr_payload')}")
-    
     return runner.ctx
 
 
 async def test_parallel(n=3):
-    print(f"\n=== {n} Parallel Requests ===\n")
-    
-    t_start = time.perf_counter()
-    
     tasks = [createQr(amount=1000 + i*100) for i in range(n)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
-    elapsed = time.perf_counter() - t_start
-    
     success_count = 0
-    for i, result in enumerate(results, 1):
-        if isinstance(result, Exception):
-            print(f"[{i}] ERROR: {result}")
-        elif result.get("transfer_id"):
-            print(f"[{i}] OK: {result['transfer_id']}")
+    for result in results:
+        if not isinstance(result, Exception) and result.get("transfer_id"):
             success_count += 1
-        else:
-            print(f"[{i}] FAIL")
     
-    print(f"ИТОГ: {success_count}/{n} успешно за {elapsed:.1f}s")
+    return success_count, len(results)
 
 
 if __name__ == "__main__":
