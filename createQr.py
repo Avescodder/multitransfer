@@ -5,14 +5,16 @@ import time
 
 from httpFlowRunner import FlowRunner, Step, ExtractRule
 from config import config
-from app.core.yamlManage import YamlManage
+# from app.core.yamlManage import YamlManage
+from yamlManage import YamlManage
 from config.config import CARD_COUNTRIES, DATES_PASSPORT
 from captcha.solve import solve_captcha_with_playwright
 
+RUCAPTCHA_API_KEY = ""
 
 async def createQr(amount: int):
     user_agent = random.choice(config.USER_AGENTS)
-    proxy = "http://user:pass@host:port"
+    proxy = ""
 
     session_id = str(uuid.uuid4())
 
@@ -49,10 +51,12 @@ async def createQr(amount: int):
 
     captcha_token = await solve_captcha_with_playwright(
         captcha_key=runner.ctx["captcha_key"],
-        proxy=proxy,
+        proxy=proxy,  # Не используется, но для совместимости
         user_agent=user_agent,
-        cookies=runner.client.cookies,
+        cookies=dict(runner.client.cookies),
+        rucaptcha_api_key=RUCAPTCHA_API_KEY,
     )
+
 
     runner.ctx["captcha_token"] = captcha_token
 
@@ -67,6 +71,9 @@ async def createQr(amount: int):
                 "client-id": "multitransfer-web-id",
                 "fhpsessionid": session_id,
                 "User-Agent": user_agent,
+                "content-type": "application/json",  
+                "fhprequestid": str(uuid.uuid4()),   
+                "x-request-id": str(uuid.uuid4()),
             },
             json_body={
                 "countryCode": country["countryCode"],
@@ -93,18 +100,22 @@ async def createQr(amount: int):
             url="https://api.multitransfer.ru/anonymous/multi/multitransfer-transfer-create/v3/anonymous/transfers/create",
             headers={
                 "client-id": "multitransfer-web-id",
+                "content-type": "application/json",
                 "fhpsessionid": session_id,
                 "fhptokenid": "{{captcha_token}}",
+                "fhprequestid": str(uuid.uuid4()),
+                "x-request-id": str(uuid.uuid4()),
                 "User-Agent": user_agent,
             },
             json_body={
                 "transfer": {
-                    "service_name": "multitransfer",
                     "paymentSystemId": "{{payment_system_id}}",
-                    "countryCode": country["countryCode"],
+                    "countryCode": "TJK",
                     "beneficiaryAccountNumber": "5058270855938719",
                     "commissionId": "{{commission_id}}",
-                    "paymentInstrument": {"type": "ANONYMOUS_CARD"},
+                    "paymentInstrument": {
+                        "type": "ANONYMOUS_CARD"
+                    }
                 },
                 "sender": {
                     "lastName": random.choice(config.LAST_NAMES),

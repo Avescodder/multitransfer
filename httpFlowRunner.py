@@ -149,8 +149,19 @@ class FlowRunner:
             params=params,
             json=json_body,
         )
+        print(f"\n[HTTP] {step.name}")
+        print(f"  URL: {url}")
+        print(f"  Method: {step.method}")
+        if json_body:
+            import json as json_lib
+            print(f"  Body: {json_lib.dumps(json_body, ensure_ascii=False, indent=2)[:500]}")
+
 
         time.sleep(0.15)
+
+        print(f"  Status: {resp.status_code}")
+        if resp.status_code >= 400:
+            print(f"  Error: {resp.text[:500]}")
 
         if step.expect_status and resp.status_code != step.expect_status:
             raise RuntimeError(f"{step.name}: {resp.status_code}")
