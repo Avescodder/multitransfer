@@ -4,10 +4,9 @@ import dotenv
 import uuid
 import time
 import os
-from pathlib import Path
 from datetime import datetime, timedelta
 
-from playwright.async_api import async_playwright, Browser
+import httpx
 
 from httpFlowRunner import FlowRunner, Step, ExtractRule
 from config import config
@@ -15,38 +14,6 @@ from yamlManage import YamlManage
 from config.config import CARD_COUNTRIES, DATES_PASSPORT
 
 dotenv.load_dotenv()
-
-
-class BrowserPool:
-    _browser: Browser = None
-    _playwright = None
-    _lock = asyncio.Lock()
-    
-    @classmethod
-    async def get_browser(cls):
-        async with cls._lock:
-            if cls._browser is None:
-                cls._playwright = await async_playwright().start()
-                cls._browser = await cls._playwright.chromium.launch(
-                    headless=True,
-                    args=['--disable-blink-features=AutomationControlled']
-                )
-            return cls._browser
-    
-    @classmethod
-    async def create_context(cls, proxy_host, proxy_port, proxy_user, proxy_pass, user_agent):
-        browser = await cls.get_browser()
-        return await browser.new_context(
-            locale="ru-RU",
-            timezone_id=random.choice(config.TIMEZONES),
-            user_agent=user_agent,
-            viewport={"width": random.choice(config.WIDTHS), "height": random.choice(config.HEIGHTS)},
-            proxy={
-                "server": f"http://{proxy_host}:{proxy_port}",
-                "username": proxy_user,
-                "password": proxy_pass
-            }
-        )
 
 
 class CaptchaCache:
@@ -66,89 +33,60 @@ class CaptchaCache:
     @classmethod
     async def set(cls, captcha_key, token):
         async with cls._lock:
-            expires = datetime.now() + timedelta(seconds=120)
+            expires = datetime.now() + timedelta(seconds=110)
             cls._cache[captcha_key] = (token, expires)
 
 
-def write_captcha_html(captcha_key: str) -> None:
-    with open("captcha/captcha.html", "r", encoding="utf-8") as f:
-        html = f.read()
-    html = html.replace("__CAPTCHA_KEY__", captcha_key)
-    with open("captcha/captcha_runtime.html", "w", encoding="utf-8") as f:
-        f.write(html)
-
-
-async def solve_captcha_fast(captcha_key, proxy_host, proxy_port, proxy_user, proxy_pass, user_agent):
-    cached = await CaptchaCache.get(captcha_key)
-    if cached:
-        return cached
+async def solve_captcha_rucaptcha(captcha_key: str, rucaptcha_api_key: str) -> str:
+    start = time.time()
     
-    html_path = Path("captcha/captcha_runtime.html").absolute()
-    write_captcha_html(captcha_key)
-    
-    context = await BrowserPool.create_context(
-        proxy_host, proxy_port, proxy_user, proxy_pass, user_agent
-    )
-    
-    try:
-        page = await context.new_page()
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            "https://rucaptcha.com/in.php",
+            data={
+                "key": rucaptcha_api_key,
+                "method": "yandex",
+                "sitekey": captcha_key,
+                "pageurl": "https://multitransfer.ru",
+                "json": 1,
+            }
+        )
         
-        await page.set_extra_http_headers({
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Referer": "https://multitransfer.ru/",
-            "Origin": "https://multitransfer.ru",
-        })
+        result = resp.json()
         
-        async def route_handler(route):
-            headers = route.request.headers.copy()
-            headers["Referer"] = "https://multitransfer.ru/"
-            headers["Origin"] = "https://multitransfer.ru"
-            await route.continue_(headers=headers)
+        if result.get("status") != 1:
+            raise RuntimeError(f"RuCaptcha submit failed: {result.get('request')}")
         
-        await page.route("**/*", route_handler)
-        await page.goto(f"file://{html_path}")
-        await page.wait_for_selector(".smart-captcha", timeout=5_000)
-        await page.click(".smart-captcha")
+        captcha_id = result["request"]
         
-        event = asyncio.Event()
-        result_data = {}
-        checks_count = 0
-        MAX_CHECKS = 2
+        wait_times = [2] * 3 + [3] * 37
         
-        async def on_response(response):
-            nonlocal checks_count
-            if (response.url.startswith("https://smartcaptcha.cloud.yandex.ru/check") 
-                and response.request.method == "POST"):
-                checks_count += 1
-                data = await response.json()
-                
-                if data.get("status") == "ok":
-                    result_data.update(data)
-                    event.set()
-                elif checks_count >= MAX_CHECKS:
-                    event.set()
+        for i, wait in enumerate(wait_times):
+            await asyncio.sleep(wait)
+            
+            resp = await client.get(
+                "https://rucaptcha.com/res.php",
+                params={
+                    "key": rucaptcha_api_key,
+                    "action": "get",
+                    "id": captcha_id,
+                    "json": 1
+                }
+            )
+            
+            result = resp.json()
+            
+            if result.get("status") == 1:
+                elapsed = time.time() - start
+                print(f"[Captcha] Solved in {elapsed:.1f}s")
+                return result["request"]
+            
+            if result.get("request") == "CAPCHA_NOT_READY":
+                continue
+            
+            raise RuntimeError(f"RuCaptcha error: {result.get('request')}")
         
-        page.on("response", on_response)
-        
-        try:
-            await asyncio.wait_for(event.wait(), timeout=30)
-        except asyncio.TimeoutError:
-            return None
-        finally:
-            try:
-                page.remove_listener("response", on_response)
-            except:
-                pass
-        
-        token = result_data.get("spravka")
-        
-        if token:
-            await CaptchaCache.set(captcha_key, token)
-        
-        return token
-        
-    finally:
-        await context.close()
+        raise RuntimeError("RuCaptcha timeout (120s)")
 
 
 async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
@@ -182,29 +120,15 @@ async def createQr(amount: int, proxy: str = os.getenv('PROXY')):
     
     runner.run(steps_init)
     
-    if proxy and "@" in proxy:
-        parts = proxy.replace("http://", "").replace("https://", "").split("@")
-        auth = parts[0].split(":")
-        host_port = parts[1].split(":")
-        proxy_user, proxy_pass = auth[0], auth[1]
-        proxy_host, proxy_port = host_port[0], int(host_port[1])
-    else:
-        proxy_host = "proxy.example.com"
-        proxy_port = 8080
-        proxy_user = ""
-        proxy_pass = ""
-    
-    captcha_token = await solve_captcha_fast(
-        captcha_key=runner.ctx["captcha_key"],
-        proxy_host=proxy_host,
-        proxy_port=proxy_port,
-        proxy_user=proxy_user,
-        proxy_pass=proxy_pass,
-        user_agent=user_agent
-    )
+    captcha_token = await CaptchaCache.get(runner.ctx["captcha_key"])
     
     if not captcha_token:
-        raise RuntimeError("Failed to solve captcha")
+        rucaptcha_api_key = os.getenv('RUCAPTCHA_API_KEY')
+        captcha_token = await solve_captcha_rucaptcha(
+            captcha_key=runner.ctx["captcha_key"],
+            rucaptcha_api_key=rucaptcha_api_key
+        )
+        await CaptchaCache.set(runner.ctx["captcha_key"], captcha_token)
     
     runner.ctx["captcha_token"] = captcha_token
     

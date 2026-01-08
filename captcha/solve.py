@@ -37,7 +37,7 @@ async def solve_captcha_with_playwright(
         
         captcha_id = result["request"]
         
-        wait_times = [2] * 3 + [3] * 37  # 6s + 111s = 117s total
+        wait_times = [2] * 3 + [3] * 37
         
         for i, wait in enumerate(wait_times):
             await asyncio.sleep(wait)
@@ -74,7 +74,6 @@ def solve_captcha(
     cookies: Optional[dict],
     rucaptcha_api_key: str,
 ) -> str:
-    """Синхронная обёртка"""
     return asyncio.run(
         solve_captcha_with_playwright(
             captcha_key=captcha_key,

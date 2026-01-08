@@ -4,7 +4,6 @@ from createQr import createQr
 
 
 async def test_single():
-    """Одиночный тест"""
     print("\n=== Single Request ===")
     
     start = time.time()
@@ -24,7 +23,6 @@ async def test_single():
 
 
 async def test_sequential(n=3):
-    """Последовательные тесты"""
     print(f"\n=== {n} Sequential Requests ===")
     
     results = []
@@ -54,7 +52,6 @@ async def test_sequential(n=3):
 
 
 async def test_parallel(n=3):
-    """Параллельные тесты"""
     print(f"\n=== {n} Parallel Requests ===")
     
     start = time.time()
