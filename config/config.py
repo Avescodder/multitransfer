@@ -1,7 +1,7 @@
 import random
 from datetime import datetime, timedelta
-import dotenv
 import os
+import dotenv
 
 dotenv.load_dotenv()
 
@@ -40,12 +40,12 @@ def genPhone() -> str:
     return f"79{random.randint(100000000, 999999999)}"
 
 def generate_passport_dates() -> dict:
-    years_ago = random.randint(18, 60)
+    years_ago = random.randint(21, 55)
     birth_date = datetime.now() - timedelta(days=years_ago * 365)
     birth_date = birth_date.replace(month=random.randint(1, 12), day=random.randint(1, 28))
     
-    min_issue = birth_date + timedelta(days=18 * 365)
-    max_issue = datetime.now()
+    min_issue = birth_date + timedelta(days=20 * 365)
+    max_issue = datetime.now() - timedelta(days=365)
     days_range = (max_issue - min_issue).days
     
     issue_date = min_issue + timedelta(days=random.randint(0, days_range)) if days_range > 0 else min_issue

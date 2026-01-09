@@ -42,7 +42,7 @@ async def main():
             print(f"  Transfer ID: {result['transfer_id']}")
             print(f"  Transfer Num: {result['transfer_num']}")
             qr_payload = result.get('qr_payload')
-            print(f"  QR Payload: {qr_payload[:50]}..." if qr_payload else "  QR Payload: None")
+            print(f"  QR Payload: {qr_payload}" if qr_payload else "  QR Payload: None")
         else:
             print(f"  Failed: {result.get('error', 'Unknown error')}")
 
