@@ -7,17 +7,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
-TIMEZONES = [
-    "Europe/Moscow",
-    "Europe/Samara", 
-    "Asia/Yekaterinburg",
-    "Asia/Omsk",
-    "Europe/Kaliningrad"
-]
-
-WIDTHS = [1920, 1366, 1536, 1440]
-HEIGHTS = [1080, 768, 864, 900]
-
 FIRST_NAMES = [
     "ИВАН", "ПЕТР", "СЕРГЕЙ", "АНДРЕЙ", "ДМИТРИЙ",
     "АЛЕКСАНДР", "МИХАИЛ", "АЛЕКСЕЙ", "ЕВГЕНИЙ", "АНТОН"
@@ -32,21 +21,6 @@ MIDDLE_NAMES = [
     "ИВАНОВИЧ", "ПЕТРОВИЧ", "СЕРГЕЕВИЧ", "АНДРЕЕВИЧ", "ДМИТРИЕВИЧ",
     "АЛЕКСАНДРОВИЧ", "МИХАЙЛОВИЧ", "АЛЕКСЕЕВИЧ", "ЕВГЕНЬЕВИЧ", "АНТОНОВИЧ"
 ]
-
-
-def random_series() -> str:
-    """Генерация серии паспорта"""
-    return f"{random.randint(10, 99)}{random.randint(10, 99)}"
-
-
-def random_number() -> str:
-    """Генерация номера паспорта"""
-    return str(random.randint(100000, 999999))
-
-
-def genPhone() -> str:
-    """Генерация номера телефона"""
-    return f"79{random.randint(100000000, 999999999)}"
 
 CARD_COUNTRIES = {
     "TJK": {
@@ -69,8 +43,16 @@ CARD_COUNTRIES = {
     }
 }
 
+def random_series() -> str:
+    return f"{random.randint(10, 99)}{random.randint(10, 99)}"
 
-def generate_passport_dates():
+def random_number() -> str:
+    return str(random.randint(100000, 999999))
+
+def genPhone() -> str:
+    return f"79{random.randint(100000000, 999999999)}"
+
+def generate_passport_dates() -> dict:
     years_ago = random.randint(18, 60)
     birth_date = datetime.now() - timedelta(days=years_ago * 365)
     birth_date = birth_date.replace(
@@ -91,6 +73,3 @@ def generate_passport_dates():
         "birth_date": birth_date.strftime("%Y-%m-%dT00:00:00"),
         "issue_date": issue_date.strftime("%Y-%m-%dT00:00:00")
     }
-
-
-DATES_PASSPORT = [generate_passport_dates() for _ in range(20)]
