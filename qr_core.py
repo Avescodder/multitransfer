@@ -5,7 +5,6 @@ import time
 import re
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 
 import httpx
 
@@ -24,7 +23,6 @@ class Cache:
     build_id_lock = asyncio.Lock()
     
     captcha_cache: Dict[str, Tuple[str, float]] = {}
-    captcha_locks: Dict[str, asyncio.Lock] = {}
     captcha_lock = asyncio.Lock()
     
     @classmethod
@@ -41,7 +39,6 @@ class Cache:
             try:
                 resp = await client.get("https://multitransfer.ru/", timeout=5.0)
                 match = re.search(r'/_next/static/([^/]+)/_buildManifest\.js', resp.text)
-                
                 if match:
                     cls.build_id = match.group(1)
                     cls.build_id_expires = now + 3600
@@ -62,49 +59,42 @@ class Cache:
                 token, expires = cls.captcha_cache[key]
                 if now < expires:
                     return token
-                else:
-                    del cls.captcha_cache[key]
-            
-            if key not in cls.captcha_locks:
-                cls.captcha_locks[key] = asyncio.Lock()
-            
-            lock = cls.captcha_locks[key]
+                del cls.captcha_cache[key]
         
-        async with lock:
-            async with cls.captcha_lock:
-                if key in cls.captcha_cache:
-                    token, expires = cls.captcha_cache[key]
-                    if now < expires:
-                        return token
-            
-            token = await solver(key, api_key, client)
-            
-            async with cls.captcha_lock:
-                cls.captcha_cache[key] = (token, time.time() + 100)
-            
-            return token
+        token = await solver(key, api_key, client)
+        
+        async with cls.captcha_lock:
+            cls.captcha_cache[key] = (token, time.time() + 90)
+        
+        return token
+    
+    @classmethod
+    async def invalidate_captcha(cls, key: str):
+        async with cls.captcha_lock:
+            if key in cls.captcha_cache:
+                del cls.captcha_cache[key]
 
 
 async def solve_captcha(key: str, api_key: str, client: httpx.AsyncClient) -> str:
     resp = await client.post(
         "https://rucaptcha.com/in.php",
         data={"key": api_key, "method": "yandex", "sitekey": key, "pageurl": "https://multitransfer.ru", "json": 1},
-        timeout=20.0
+        timeout=15.0
     )
     
     result = resp.json()
     if result.get("status") != 1:
-        raise RuntimeError(f"Captcha submit failed: {result.get('request')}")
+        raise RuntimeError(f"Captcha submit: {result.get('request')}")
     
     captcha_id = result["request"]
     
-    for _ in range(60):
+    for i in range(40):
         await asyncio.sleep(1.0)
         
         resp = await client.get(
             "https://rucaptcha.com/res.php",
             params={"key": api_key, "action": "get", "id": captcha_id, "json": 1},
-            timeout=10.0
+            timeout=8.0
         )
         
         result = resp.json()
@@ -113,7 +103,7 @@ async def solve_captcha(key: str, api_key: str, client: httpx.AsyncClient) -> st
             return result["request"]
         
         if result.get("request") != "CAPCHA_NOT_READY":
-            raise RuntimeError(f"Captcha error: {result.get('request')}")
+            raise RuntimeError(f"Captcha: {result.get('request')}")
     
     raise RuntimeError("Captcha timeout")
 
@@ -128,14 +118,14 @@ class QRResult:
     duration: float = 0
 
 
-async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retries: int = 3) -> QRResult:
+async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retries: int = 2) -> QRResult:
     start = time.time()
+    captcha_key = None
     
     for attempt in range(retries + 1):
         try:
             session_id = str(uuid.uuid4())
             user_agent = random.choice(USER_AGENTS)
-            passport = generate_passport_dates()
             
             headers = {
                 "User-Agent": user_agent,
@@ -151,11 +141,14 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
                 f"https://multitransfer.ru/_next/data/{build_id}/ru/transfer/tajikistan/sender-details.json",
                 params={"country": "tajikistan"},
                 headers={**headers, "referer": "https://multitransfer.ru/"},
-                timeout=10.0
+                timeout=8.0
             )
             
-            if not resp.text or resp.text.strip() == "":
-                raise RuntimeError("Empty response")
+            if resp.status_code != 200 or not resp.text:
+                if attempt < retries:
+                    await asyncio.sleep(0.5)
+                    continue
+                raise RuntimeError(f"Captcha key fetch: {resp.status_code}")
             
             captcha_key = resp.json()["pageProps"]["captcha_key"]
             
@@ -172,14 +165,21 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
                         "withdrawMoney": {"currencyCode": CARD_COUNTRY["currencyTo"]},
                     },
                 },
-                timeout=15.0
+                timeout=10.0
             )
+            
+            if resp.status_code != 200:
+                if resp.status_code in [502, 503, 504] and attempt < retries:
+                    await asyncio.sleep(1.0)
+                    continue
+                raise RuntimeError(f"Commission: {resp.status_code}")
+            
             data = resp.json()
             commission_id = data["fees"][0]["commissions"][0]["commissionId"]
             payment_system_id = data["fees"][0]["commissions"][0]["paymentSystemId"]
             
-            fresh_passport = generate_passport_dates()
-            card_unique = f"505827{random.randint(1000000000, 9999999999)}"
+            passport = generate_passport_dates()
+            card_number = f"505827{random.randint(1000000000, 9999999999)}"
             
             resp = await client.post(
                 "https://api.multitransfer.ru/anonymous/multi/multitransfer-transfer-create/v3/anonymous/transfers/create",
@@ -193,7 +193,7 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
                     "transfer": {
                         "paymentSystemId": payment_system_id,
                         "countryCode": CARD_COUNTRY["countryCode"],
-                        "beneficiaryAccountNumber": card_unique,
+                        "beneficiaryAccountNumber": card_number,
                         "commissionId": commission_id,
                         "paymentInstrument": {"type": "ANONYMOUS_CARD"}
                     },
@@ -201,41 +201,50 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
                         "lastName": random.choice(LAST_NAMES),
                         "firstName": random.choice(FIRST_NAMES),
                         "middleName": random.choice(MIDDLE_NAMES),
-                        "birthDate": fresh_passport["birth_date"],
+                        "birthDate": passport["birth_date"],
                         "phoneNumber": f"79{random.randint(100000000, 999999999)}",
                         "documents": [{
                             "type": "21",
                             "series": f"{random.randint(10, 99)}{random.randint(10, 99)}",
                             "number": str(random.randint(100000, 999999)),
-                            "issueDate": fresh_passport["issue_date"],
+                            "issueDate": passport["issue_date"],
                             "countryCode": "RUS",
                         }],
                     },
                 },
-                timeout=15.0
+                timeout=10.0
             )
+            
+            if resp.status_code != 201:
+                try:
+                    resp_data = resp.json()
+                    error_code = resp_data.get("error", {}).get("code")
+                    
+                    if error_code in [103, 400, 403]:
+                        if captcha_key:
+                            await Cache.invalidate_captcha(captcha_key)
+                        if attempt < retries:
+                            await asyncio.sleep(1.0)
+                            continue
+                    
+                    raise RuntimeError(f"Transfer {resp.status_code}: {error_code}")
+                except:
+                    if attempt < retries:
+                        await asyncio.sleep(0.5)
+                        continue
+                    raise RuntimeError(f"Transfer: {resp.status_code}")
             
             resp_data = resp.json()
             
             if "transferId" not in resp_data:
                 error_code = resp_data.get("error", {}).get("code")
-                
-                if error_code in [400, 403]:
-                    async with Cache.captcha_lock:
-                        if captcha_key in Cache.captcha_cache:
-                            del Cache.captcha_cache[captcha_key]
-                    
+                if error_code in [103, 400, 403]:
+                    if captcha_key:
+                        await Cache.invalidate_captcha(captcha_key)
                     if attempt < retries:
                         await asyncio.sleep(1.0)
                         continue
-                
-                elif error_code == 103:
-                    if attempt < retries:
-                        delay = 0.5 * (2 ** attempt) + random.uniform(0, 0.5)
-                        await asyncio.sleep(delay)
-                        continue
-                
-                raise KeyError(f"transferId not in response: {resp_data}")
+                raise KeyError(f"No transferId: {error_code}")
             
             transfer_id = resp_data["transferId"]
             transfer_num = resp_data["transferNum"]
@@ -244,8 +253,12 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
                 "https://api.multitransfer.ru/anonymous/multi/multitransfer-qr-processing/v3/anonymous/confirm",
                 headers={**headers, "fhprequestid": str(uuid.uuid4()), "x-request-id": str(uuid.uuid4())},
                 json={"transactionId": transfer_id, "recordType": "transfer"},
-                timeout=15.0
+                timeout=10.0
             )
+            
+            if resp.status_code != 200:
+                raise RuntimeError(f"Confirm: {resp.status_code}")
+            
             qr_payload = resp.json()["externalData"]["payload"]
             
             return QRResult(
@@ -259,8 +272,7 @@ async def create_qr(amount: int, api_key: str, client: httpx.AsyncClient, retrie
         except Exception as e:
             if attempt == retries:
                 return QRResult(success=False, error=str(e), duration=time.time() - start)
-            
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
     
     return QRResult(success=False, error="Max retries", duration=time.time() - start)
 
@@ -275,8 +287,8 @@ class QRPool:
     
     async def __aenter__(self):
         self.client = httpx.AsyncClient(
-            timeout=30.0,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=30.0),
+            timeout=20.0,
+            limits=httpx.Limits(max_connections=30, max_keepalive_connections=20, keepalive_expiry=60.0),
             proxy=self.proxy if self.proxy else None,
             follow_redirects=True
         )
@@ -288,7 +300,6 @@ class QRPool:
     
     async def generate(self, amount: int) -> QRResult:
         async with self.sem:
-            await asyncio.sleep(random.uniform(0.5, 1.5))
             return await create_qr(amount, self.api_key, self.client)
     
     async def generate_batch(self, amounts: List[int]) -> List[QRResult]:
