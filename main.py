@@ -1,38 +1,38 @@
 import asyncio
+import time
 from config import config
-from qr_pool import QRGeneratorPool
+from qr_generator_race import generate_qr_race
 
 
 async def main():
-    tasks = [
-        {"amount": 1000, "card_number": "5058270855938719"},
-        {"amount": 1500, "card_number": "5058270855938719"},
-        {"amount": 2000, "card_number": "5058270855938719"},
-        {"amount": 2500, "card_number": "5058270855938719"},
-        {"amount": 3000, "card_number": "5058270855938719"},
-    ]
+    proxy = config.PROXY
+    amount = 1000
+    card_number = "5058270855938719"
+    card_country = "TJK"
+    attempts = 3 
     
-    pool = QRGeneratorPool(
-        proxy=config.PROXY,
-        max_concurrent=10  
+    print(f"Starting QR generation with {attempts} parallel attempts")
+    
+    start_time = time.time()
+    
+    result = await generate_qr_race(
+        proxy=proxy,
+        amount=amount,
+        card_number=card_number,
+        card_country=card_country,
+        attempts=attempts
     )
     
-    try:
-        results = await pool.generate_batch(tasks)
-        
-        for i, result in enumerate(results, 1):
-            print(f"Task {i}:")
-            if result.get("success"):
-                print(f"  Transfer ID: {result['transfer_id']}")
-                print(f"  Transfer Num: {result['transfer_num']}")
-                qr_payload = result.get('qr_payload')
-                print(f"  QR Payload: {qr_payload}" if qr_payload else "  QR Payload: None")
-            else:
-                print(f"  Failed: {result.get('error', 'Unknown error')}")
-            print()
+    elapsed = time.time() - start_time
     
-    finally:
-        await pool.close()
+    print(f"Total time: {elapsed:.2f} seconds")
+    
+    if result:
+        print(f"Transfer ID: {result['transfer_id']}")
+        print(f"Transfer Num: {result['transfer_num']}")
+        print(f"QR Payload: {result.get('qr_payload', 'N/A')}")
+    else:
+        print(f"Failed all. {attempts} attempts unsuccessful")
 
 
 if __name__ == "__main__":

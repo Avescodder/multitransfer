@@ -1,5 +1,4 @@
 import random
-from datetime import datetime, timedelta
 import os
 import dotenv
 
@@ -29,32 +28,41 @@ TARGET_URL = "https://multitransfer.ru"
 
 CAPTCHA_API_KEY = os.getenv('CAPTCHA_API_KEY')
 PROXY = os.getenv('PROXY')
-SERVICE = "2captcha"
+CAPTCHA_SERVICE = "2captcha"
 PRIORITY = 10
+
+PASSPORT_DATES = [
+    {"date_birth": "1985-03-15T00:00:00", "date_issue": "2010-06-20T00:00:00"},
+    {"date_birth": "1990-07-22T00:00:00", "date_issue": "2015-09-10T00:00:00"},
+    {"date_birth": "1988-11-30T00:00:00", "date_issue": "2012-04-15T00:00:00"},
+    {"date_birth": "1992-05-18T00:00:00", "date_issue": "2016-08-25T00:00:00"},
+    {"date_birth": "1987-09-08T00:00:00", "date_issue": "2011-12-03T00:00:00"},
+    {"date_birth": "1991-01-25T00:00:00", "date_issue": "2014-05-30T00:00:00"},
+    {"date_birth": "1989-06-12T00:00:00", "date_issue": "2013-10-18T00:00:00"},
+    {"date_birth": "1993-10-05T00:00:00", "date_issue": "2017-02-14T00:00:00"},
+    {"date_birth": "1986-04-28T00:00:00", "date_issue": "2010-11-22T00:00:00"},
+    {"date_birth": "1994-08-16T00:00:00", "date_issue": "2018-01-09T00:00:00"},
+    {"date_birth": "1984-12-20T00:00:00", "date_issue": "2009-07-15T00:00:00"},
+    {"date_birth": "1995-02-11T00:00:00", "date_issue": "2019-06-28T00:00:00"},
+    {"date_birth": "1983-07-03T00:00:00", "date_issue": "2008-03-19T00:00:00"},
+    {"date_birth": "1996-11-24T00:00:00", "date_issue": "2020-04-12T00:00:00"},
+    {"date_birth": "1982-05-14T00:00:00", "date_issue": "2007-09-08T00:00:00"},
+    {"date_birth": "1997-09-07T00:00:00", "date_issue": "2021-02-23T00:00:00"},
+    {"date_birth": "1981-01-19T00:00:00", "date_issue": "2006-12-05T00:00:00"},
+    {"date_birth": "1998-04-30T00:00:00", "date_issue": "2022-08-17T00:00:00"},
+    {"date_birth": "1980-08-26T00:00:00", "date_issue": "2005-05-11T00:00:00"},
+    {"date_birth": "1999-12-09T00:00:00", "date_issue": "2023-03-26T00:00:00"},
+]
+
 
 def random_series() -> str:
     return f"{random.randint(10, 99)}{random.randint(10, 99)}"
 
+
 def random_number() -> str:
     return str(random.randint(100000, 999999))
+
 
 def genPhone() -> str:
     return f"79{random.randint(100000000, 999999999)}"
 
-def generate_passport_dates() -> dict:
-    years_ago = random.randint(21, 55)
-    birth_date = datetime.now() - timedelta(days=years_ago * 365)
-    birth_date = birth_date.replace(month=random.randint(1, 12), day=random.randint(1, 28))
-    
-    min_issue = birth_date + timedelta(days=20 * 365)
-    max_issue = datetime.now() - timedelta(days=365)
-    days_range = (max_issue - min_issue).days
-    
-    issue_date = min_issue + timedelta(days=random.randint(0, days_range)) if days_range > 0 else min_issue
-    
-    return {
-        "birth_date": birth_date.strftime("%Y-%m-%dT00:00:00"),
-        "issue_date": issue_date.strftime("%Y-%m-%dT00:00:00")
-    }
-
-DATES_PASSPORT = [generate_passport_dates() for _ in range(100)]

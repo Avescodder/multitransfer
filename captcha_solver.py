@@ -180,7 +180,7 @@ async def solve_captcha(
     sitekey: str, 
     page_url: str = "https://multitransfer.ru",
     priority: int = 10,
-    service: str = config.SERVICE
+    service: str = config.CAPTCHA_SERVICE
 ) -> Optional[str]:
     
     if service == "2captcha":
