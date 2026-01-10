@@ -2,6 +2,7 @@ import asyncio
 import random
 import uuid
 from typing import Optional, Dict, Any
+import httpx  
 
 from config import config
 from captcha_solver import solve_captcha
@@ -11,11 +12,20 @@ from http_client import AsyncHttpClient, generate_headers
 class QRGenerator:
     API_BASE = "https://api.multitransfer.ru"
     
-    def __init__(self, proxy: str, user_agent: str):
+    def __init__(
+        self, 
+        proxy: str, 
+        user_agent: str,
+        shared_client: Optional[httpx.AsyncClient] = None  
+    ):
         self.proxy = proxy
         self.user_agent = user_agent
         self.fhpsessionid = str(uuid.uuid4())
-        self.client = AsyncHttpClient(proxy=proxy)
+        
+        self.client = AsyncHttpClient(
+            proxy=proxy,
+            shared_client=shared_client  
+        )
     
     async def generate(
         self,
@@ -59,7 +69,8 @@ class QRGenerator:
             print(f"[QRGenerator] Error: {e}")
             return None
         finally:
-            await self.client.close()
+            await self.client.close()  
+    
     
     async def _calc_commissions(self, amount: float, card_country: str) -> Optional[Dict[str, Any]]:
         country_data = config.CARD_COUNTRIES[card_country]

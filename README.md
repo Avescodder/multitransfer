@@ -15,11 +15,12 @@ uv sync
 В файле `.env` укажите ваши ключи:
 
 ```python
-RUCAPTCHA_API_KEY = "ваш_ключ_от_rucaptcha"
+CAPTCHA_API_KEY = "ваш_ключ_от_rucaptcha_или_от_2captcha"
 PROXY=http://user:pass@host:port
 ```
 
 Структуру файла .env можете скопировать с .env.example
+По default установлена конфигурация 2captcha, с ней производительность возрастает 
 
 ## Запуск
 
@@ -35,34 +36,29 @@ python main.py
 - `qr_payload` - полная ссылка на QR код (формат: `https://qr.nspk.ru/...`)
 - `qr_data` - полные данные ответа API
 
-## Производительность
-
-- **Многопоточность**: до 10 одновременных запросов
-- **Success rate**: 80-95% (зависит от качества прокси)
-
 ## Возможные ошибки
 
 **423 - Дата паспорта некорректна**
-- Исправьте данные паспорта
+- Проблема с генерацией паспортных данных
 
 **402 - Не удалось проверить данные**
 - Проблема с captcha token
-- Проверьте баланс Rucaptcha
+- Проверьте баланс Rucaptcha или 2captcha
 - Проверьте качество прокси
 
 **502 - Bad Gateway**
 - Сервер перегружен
-- Используется автоматический retry (3 попытки)
 - Проверьте прокси
 
 ## Структура проекта
 
 ```
 config/config.py          - Конфигурация и генерация данных
-captcha_solver.py         - Интеграция с Rucaptcha
+captcha_solver.py         - 2Captcha и Rucaptcha интеграция
 http_client.py            - HTTP клиент с пулом соединений
 build_id_fetcher.py       - Автоматическое получение BUILD_ID
 qr_generator.py           - Основная логика генерации
+qr_pool.py                - Connection pool и параллельная обработка
 main.py                   - Точка входа
 ```
 
@@ -71,9 +67,15 @@ main.py                   - Точка входа
 Полный ответ `qr_data` содержит:
 ```json
 {
-  "externalData": {
-    "payload": "https://qr.nspk.ru/...",
-    "type": "QR"
+  "success": true,
+  "transfer_id": "ea9bc1d1-35ad-479d-a4ce-d6dda79f8a3b",
+  "transfer_num": "857031673348",
+  "qr_payload": "https://qr.nspk.ru/...",
+  "qr_data": {
+    "externalData": {
+      "payload": "https://qr.nspk.ru/...",
+      "type": "QR"
+    }
   }
 }
 ```

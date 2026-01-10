@@ -27,8 +27,10 @@ CARD_COUNTRIES = {
 
 TARGET_URL = "https://multitransfer.ru"
 
-RUCAPTCHA_API_KEY = os.getenv('RUCAPTCHA_API_KEY')
+CAPTCHA_API_KEY = os.getenv('CAPTCHA_API_KEY')
 PROXY = os.getenv('PROXY')
+SERVICE = "2captcha"
+PRIORITY = 10
 
 def random_series() -> str:
     return f"{random.randint(10, 99)}{random.randint(10, 99)}"

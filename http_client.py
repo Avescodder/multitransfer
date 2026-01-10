@@ -4,15 +4,26 @@ from typing import Optional, Dict, Any
 
 
 class AsyncHttpClient:
-    def __init__(self, proxy: Optional[str] = None, headers: Optional[Dict[str, str]] = None):
-        self.client = httpx.AsyncClient(
-            proxy=proxy,
-            headers=headers or {},
-            follow_redirects=True,
-            timeout=60.0,
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-            transport=httpx.AsyncHTTPTransport(retries=0)
-        )
+    def __init__(
+        self, 
+        proxy: Optional[str] = None, 
+        headers: Optional[Dict[str, str]] = None,
+        shared_client: Optional[httpx.AsyncClient] = None  
+    ):
+
+        if shared_client:
+            self.client = shared_client
+            self.is_shared = True
+        else:
+            self.client = httpx.AsyncClient(
+                proxy=proxy,
+                headers=headers or {},
+                follow_redirects=True,
+                timeout=60.0,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                transport=httpx.AsyncHTTPTransport(retries=0)
+            )
+            self.is_shared = False
     
     async def request(
         self,
@@ -31,7 +42,8 @@ class AsyncHttpClient:
         )
     
     async def close(self):
-        await self.client.aclose()
+        if not self.is_shared:
+            await self.client.aclose()
 
 
 def generate_headers(user_agent: str, fhpsessionid: str) -> Dict[str, str]:
