@@ -57,7 +57,6 @@ class QRGeneratorRace:
                 except Exception:
                     pass
             
-            # Если первая завершилась неудачей проверяем остальные
             while pending:
                 done, pending = await asyncio.wait(
                     pending,
