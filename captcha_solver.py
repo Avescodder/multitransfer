@@ -169,7 +169,7 @@ class RucaptchaSolver:
                 print(f"[RucaptchaSolver] Unexpected response: {data}")
                 return None
         
-        print(f"[RucaptchaSolver] Timeout waiting for result")
+        print("[RucaptchaSolver] Timeout waiting for result")
         return None
     
     async def close(self):
