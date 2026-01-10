@@ -32,28 +32,61 @@ class QRGeneratorRace:
         print(f"[Race] Starting {self.attempts} parallel attempts for {self.amount} RUB")
         
         tasks = [
-            self._single_attempt(attempt_num=i+1)
+            asyncio.create_task(self._single_attempt(attempt_num=i+1))
             for i in range(self.attempts)
         ]
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        if self.winner_result:
-            return self.winner_result
-        
-        for result in results:
-            if isinstance(result, dict) and result.get("transfer_id"):
-                print("[Race] Found successful result in fallback")
-                return result
-        
-        print(f"[Race] All {self.attempts} attempts failed")
-        return None
+        try:
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in done:
+                try:
+                    result = task.result()
+                    if result and result.get("transfer_id"):
+                        print(f"[Race] Cancelling {len(pending)} remaining tasks")
+                        for pending_task in pending:
+                            pending_task.cancel()
+                        
+                        if pending:
+                            await asyncio.wait(pending, timeout=1.0)
+                        
+                        return result
+                except Exception:
+                    pass
+            
+            # Если первая завершилась неудачей проверяем остальные
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending,
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                for task in done:
+                    try:
+                        result = task.result()
+                        if result and result.get("transfer_id"):
+                            for pending_task in pending:
+                                pending_task.cancel()
+                            if pending:
+                                await asyncio.wait(pending, timeout=1.0)
+                            return result
+                    except Exception:
+                        pass
+            
+            print(f"[Race] All {self.attempts} attempts failed")
+            return None
+            
+        except Exception as e:
+            print(f"[Race] Error in generate: {e}")
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            return None
     
     async def _single_attempt(self, attempt_num: int) -> Optional[Dict[str, Any]]:
-        if self.success_event.is_set():
-            print(f"[Race] Attempt {attempt_num}: Cancelled (winner found)")
-            return None
-        
         user_agent = random.choice(config.USER_AGENTS)
         client = AsyncHttpClient(proxy=self.proxy)
         fhpsessionid = str(uuid.uuid4())
@@ -79,12 +112,18 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed at captcha key")
                 return None
             
-            # 3. Solve captcha
+            # 3. Solve captcha (может быть отменена)
             if self.success_event.is_set():
                 return None
             
             print(f"[Race] Attempt {attempt_num}: Solving captcha")
-            captcha_token = await solve_captcha(captcha_key, priority=10)
+            
+            try:
+                captcha_token = await solve_captcha(captcha_key, priority=10)
+            except asyncio.CancelledError:
+                print(f"[Race] Attempt {attempt_num}: Cancelled during captcha")
+                raise
+            
             if not captcha_token:
                 print(f"[Race] Attempt {attempt_num}: Failed at captcha solve")
                 return None
@@ -122,6 +161,10 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: QR generated successfully")
             
             return result
+        
+        except asyncio.CancelledError:
+            print(f"[Race] Attempt {attempt_num}: Cancelled")
+            raise
         
         except Exception as e:
             print(f"[Race] Attempt {attempt_num}: Exception - {e}")
@@ -250,7 +293,7 @@ class QRGeneratorRace:
             
             return None
         
-        except Exception as e:  # noqa: F841
+        except Exception:
             return None
     
     async def _confirm_transfer(
@@ -279,7 +322,6 @@ class QRGeneratorRace:
         
         return None
 
-# Публичная функция для использования
 
 async def generate_qr_race(
     proxy: str,
