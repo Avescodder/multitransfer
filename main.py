@@ -35,7 +35,8 @@ async def get_captcha_key() -> str:
 
 
 async def main():
-    print("[Main] Getting captcha_key...")
+    print(f"[Main] Token pool config: size={config.TOKEN_POOL_SIZE}, lifetime={config.TOKEN_LIFETIME}s")
+    
     captcha_key = await get_captcha_key()
     print(f"[Main] Captcha key: {captcha_key}")
     
@@ -48,19 +49,29 @@ async def main():
     
     try:
         await token_pool.connect()
+        
+        await token_pool.clear_pool()
+        
         await token_pool.start_generator()
         
-        print("[Main] Waiting 10s for tokens to generate...")
-        await asyncio.sleep(10)
+        wait_time = 15
+        print(f"[Main] Waiting {wait_time}s for tokens to generate")
+        await asyncio.sleep(wait_time)
         
         pool_size = await token_pool.get_pool_size()
-        print(f"[Main] Token pool size: {pool_size}/{config.TOKEN_POOL_SIZE}")
+        print(f"[Main] Token pool ready: {pool_size}/{config.TOKEN_POOL_SIZE} tokens")
         
         proxy = config.PROXY
         amount = 1000
         card_number = "5058270855938719"
         card_country = "TJK"
         attempts = 3
+        
+        print(f"\n[Main] Starting QR generation:")
+        print(f"  - Amount: {amount} RUB")
+        print(f"  - Card: {card_number}")
+        print(f"  - Country: {card_country}")
+        print(f"  - Parallel attempts: {attempts}")
         
         start_time = time.time()
         
@@ -75,21 +86,31 @@ async def main():
         
         elapsed = time.time() - start_time
         
-        print(f"\n[Main] Total time: {elapsed:.2f}s")
+        print(f"[Main] Total time: {elapsed:.2f}s")
         
         if result:
-            print(f"[Main] Transfer ID: {result['transfer_id']}")
-            print(f"[Main] Transfer Num: {result['transfer_num']}")
-            print(f"[Main] QR Payload: {result.get('qr_payload', 'N/A')}")
+            print(f"Transfer ID:  {result['transfer_id']}")
+            print(f"Transfer Num: {result['transfer_num']}")
+            if result.get('qr_payload'):
+                print(f"QR Payload:   {result['qr_payload']}")
+            else:
+                print("QR Payload:   N/A")
         else:
-            print("[Main] Failed")
+            print("FAILED - All attempts unsuccessful")
         
         final_pool_size = await token_pool.get_pool_size()
         print(f"\n[Main] Final token pool size: {final_pool_size}/{config.TOKEN_POOL_SIZE}")
     
+    except Exception as e:
+        print(f"\n[Main] Error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+    
     finally:
+        print("\n[Main] Shutting down...")
         await token_pool.stop_generator()
         await token_pool.disconnect()
+        print("[Main] Done")
 
 
 if __name__ == "__main__":

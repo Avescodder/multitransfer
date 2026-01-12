@@ -2,10 +2,11 @@ import asyncio
 import random
 import uuid
 from typing import Optional, Dict, Any, TYPE_CHECKING
+import httpx
 
 from config import config
 from captcha_solver import solve_captcha
-from http_client import AsyncHttpClient, generate_headers
+from http_client import generate_headers
 
 if TYPE_CHECKING:
     from captcha_token_pool import CaptchaTokenPool
@@ -51,7 +52,7 @@ class QRGeneratorRace:
                 try:
                     result = task.result()
                     if result and result.get("transfer_id"):
-                        print(f"[Race] Cancelling {len(pending)} remaining tasks")
+                        print(f"[Race] Success! Cancelling {len(pending)} remaining tasks")
                         for pending_task in pending:
                             pending_task.cancel()
                         
@@ -59,8 +60,8 @@ class QRGeneratorRace:
                             await asyncio.wait(pending, timeout=1.0)
                         
                         return result
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[Race] Task failed with error: {e}")
             
             while pending:
                 done, pending = await asyncio.wait(
@@ -77,8 +78,8 @@ class QRGeneratorRace:
                             if pending:
                                 await asyncio.wait(pending, timeout=1.0)
                             return result
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[Race] Task failed with error: {e}")
             
             print(f"[Race] All {self.attempts} attempts failed")
             return None
@@ -92,13 +93,22 @@ class QRGeneratorRace:
     
     async def _single_attempt(self, attempt_num: int) -> Optional[Dict[str, Any]]:
         user_agent = random.choice(config.USER_AGENTS)
-        client = AsyncHttpClient(proxy=self.proxy)
         fhpsessionid = str(uuid.uuid4())
+        
+        # Создаем единый httpx клиент для всей попытки
+        client = httpx.AsyncClient(
+            proxy=self.proxy,
+            follow_redirects=True,
+            timeout=60.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            transport=httpx.AsyncHTTPTransport(retries=0)
+        )
         
         try:
             if self.success_event.is_set():
                 return None
             
+            print(f"[Race] Attempt {attempt_num}: Calculating commissions")
             commission_data = await self._calc_commissions(
                 client, user_agent, fhpsessionid
             )
@@ -109,6 +119,7 @@ class QRGeneratorRace:
             if self.success_event.is_set():
                 return None
             
+            print(f"[Race] Attempt {attempt_num}: Getting captcha key")
             captcha_key = await self._get_captcha_key(client, user_agent)
             if not captcha_key:
                 print(f"[Race] Attempt {attempt_num}: Failed at captcha key")
@@ -117,6 +128,7 @@ class QRGeneratorRace:
             if self.success_event.is_set():
                 return None
             
+            # Получаем токен из пула или создаем новый
             captcha_token = None
             if self.token_pool:
                 captcha_token = await self.token_pool.get_token()
@@ -150,6 +162,7 @@ class QRGeneratorRace:
             if self.success_event.is_set():
                 return None
             
+            print(f"[Race] Attempt {attempt_num}: Confirming transfer")
             qr_data = await self._confirm_transfer(
                 client, user_agent, fhpsessionid, transfer_data["transferId"]
             )
@@ -163,7 +176,7 @@ class QRGeneratorRace:
             if not self.success_event.is_set():
                 self.success_event.set()
                 self.winner_result = result
-                print(f"[Race] Attempt {attempt_num}: QR generated successfully")
+                print(f"[Race] Attempt {attempt_num}: QR generated successfully ✓")
             
             return result
         
@@ -172,120 +185,132 @@ class QRGeneratorRace:
             raise
         
         except Exception as e:
-            print(f"[Race] Attempt {attempt_num}: Exception - {e}")
+            print(f"[Race] Attempt {attempt_num}: Exception - {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         
         finally:
-            await client.close()
+            await client.aclose()
     
     async def _calc_commissions(
-        self, client: AsyncHttpClient, user_agent: str, fhpsessionid: str
+        self, client: httpx.AsyncClient, user_agent: str, fhpsessionid: str
     ) -> Optional[Dict[str, Any]]:
-        country_data = config.CARD_COUNTRIES[self.card_country]
-        headers = generate_headers(user_agent, fhpsessionid)
-        
-        payload = {
-            "countryCode": country_data["countryCode"],
-            "range": "ALL_PLUS_LIMITS",
-            "money": {
-                "acceptedMoney": {
-                    "amount": self.amount,
-                    "currencyCode": country_data["currencyFrom"]
-                },
-                "withdrawMoney": {
-                    "currencyCode": country_data["currencyTo"]
+        try:
+            country_data = config.CARD_COUNTRIES[self.card_country]
+            headers = generate_headers(user_agent, fhpsessionid)
+            
+            payload = {
+                "countryCode": country_data["countryCode"],
+                "range": "ALL_PLUS_LIMITS",
+                "money": {
+                    "acceptedMoney": {
+                        "amount": self.amount,
+                        "currencyCode": country_data["currencyFrom"]
+                    },
+                    "withdrawMoney": {
+                        "currencyCode": country_data["currencyTo"]
+                    }
                 }
             }
-        }
-        
-        response = await client.request(
-            "POST",
-            f"{self.API_BASE}/anonymous/multi/multitransfer-fee-calc/v3/commissions",
-            headers=headers,
-            json=payload
-        )
-        
-        if response.status_code != 200:
+            
+            response = await client.request(
+                "POST",
+                f"{self.API_BASE}/anonymous/multi/multitransfer-fee-calc/v3/commissions",
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                print(f"[Race] Commissions request failed: {response.status_code}")
+                return None
+            
+            data = response.json()
+            fees = data.get("fees", [])
+            
+            if not fees or not fees[0].get("commissions"):
+                print(f"[Race] No commissions found in response")
+                return None
+            
+            commission = fees[0]["commissions"][0]
+            
+            return {
+                "commission_id": commission["commissionId"],
+                "payment_system_id": commission["paymentSystemId"]
+            }
+        except Exception as e:
+            print(f"[Race] _calc_commissions error: {type(e).__name__}: {e}")
             return None
-        
-        data = response.json()
-        fees = data.get("fees", [])
-        
-        if not fees or not fees[0].get("commissions"):
-            return None
-        
-        commission = fees[0]["commissions"][0]
-        
-        return {
-            "commission_id": commission["commissionId"],
-            "payment_system_id": commission["paymentSystemId"]
-        }
     
     async def _get_captcha_key(
-        self, client: AsyncHttpClient, user_agent: str
+        self, client: httpx.AsyncClient, user_agent: str
     ) -> Optional[str]:
-        from build_id_fetcher import get_build_id
-        
-        build_id = await get_build_id()
-        if not build_id:
+        try:
+            from build_id_fetcher import get_build_id
+            
+            build_id = await get_build_id()
+            if not build_id:
+                return None
+            
+            country_name = config.CARD_COUNTRIES[self.card_country]["name"].lower()
+            
+            response = await client.request(
+                "GET",
+                f"https://multitransfer.ru/_next/data/{build_id}/ru/transfer/{country_name}/sender-details.json",
+                params={"country": country_name},
+                headers={"User-Agent": user_agent}
+            )
+            
+            if response.status_code != 200:
+                print(f"[Race] Captcha key request failed: {response.status_code}")
+                return None
+            
+            data = response.json()
+            return data.get("pageProps", {}).get("captcha_key")
+        except Exception as e:
+            print(f"[Race] _get_captcha_key error: {type(e).__name__}: {e}")
             return None
-        
-        country_name = config.CARD_COUNTRIES[self.card_country]["name"].lower()
-        
-        response = await client.request(
-            "GET",
-            f"https://multitransfer.ru/_next/data/{build_id}/ru/transfer/{country_name}/sender-details.json",
-            params={"country": country_name},
-            headers={"User-Agent": user_agent}
-        )
-        
-        if response.status_code != 200:
-            return None
-        
-        data = response.json()
-        return data.get("pageProps", {}).get("captcha_key")
     
     async def _create_transfer(
         self,
-        client: AsyncHttpClient,
+        client: httpx.AsyncClient,
         user_agent: str,
         fhpsessionid: str,
         commission_data: Dict[str, Any],
         captcha_token: str
     ) -> Optional[Dict[str, Any]]:
-        country_data = config.CARD_COUNTRIES[self.card_country]
-        
-        passport = random.choice(config.PASSPORT_DATES)
-        
-        headers = generate_headers(user_agent, fhpsessionid)
-        headers["Fhptokenid"] = captcha_token
-        
-        payload = {
-            "transfer": {
-                "service_name": "multitransfer",
-                "paymentSystemId": commission_data["payment_system_id"],
-                "countryCode": country_data["countryCode"],
-                "beneficiaryAccountNumber": self.card_number,
-                "commissionId": commission_data["commission_id"],
-                "paymentInstrument": {"type": "ANONYMOUS_CARD"}
-            },
-            "sender": {
-                "lastName": random.choice(config.LAST_NAMES),
-                "firstName": random.choice(config.FIRST_NAMES),
-                "middleName": random.choice(config.MIDDLE_NAMES),
-                "birthDate": passport["date_birth"],
-                "phoneNumber": config.genPhone(),
-                "documents": [{
-                    "type": "21",
-                    "series": config.random_series(),
-                    "number": config.random_number(),
-                    "issueDate": passport["date_issue"],
-                    "countryCode": "RUS"
-                }]
-            }
-        }
-        
         try:
+            country_data = config.CARD_COUNTRIES[self.card_country]
+            passport = random.choice(config.PASSPORT_DATES)
+            
+            headers = generate_headers(user_agent, fhpsessionid)
+            headers["Fhptokenid"] = captcha_token
+            
+            payload = {
+                "transfer": {
+                    "service_name": "multitransfer",
+                    "paymentSystemId": commission_data["payment_system_id"],
+                    "countryCode": country_data["countryCode"],
+                    "beneficiaryAccountNumber": self.card_number,
+                    "commissionId": commission_data["commission_id"],
+                    "paymentInstrument": {"type": "ANONYMOUS_CARD"}
+                },
+                "sender": {
+                    "lastName": random.choice(config.LAST_NAMES),
+                    "firstName": random.choice(config.FIRST_NAMES),
+                    "middleName": random.choice(config.MIDDLE_NAMES),
+                    "birthDate": passport["date_birth"],
+                    "phoneNumber": config.genPhone(),
+                    "documents": [{
+                        "type": "21",
+                        "series": config.random_series(),
+                        "number": config.random_number(),
+                        "issueDate": passport["date_issue"],
+                        "countryCode": "RUS"
+                    }]
+                }
+            }
+            
             response = await client.request(
                 "POST",
                 f"{self.API_BASE}/anonymous/multi/multitransfer-transfer-create/v3/anonymous/transfers/create",
@@ -296,36 +321,43 @@ class QRGeneratorRace:
             if response.status_code == 201:
                 return response.json()
             
+            print(f"[Race] Transfer creation failed: {response.status_code}, {response.text[:200]}")
             return None
         
-        except Exception:
+        except Exception as e:
+            print(f"[Race] _create_transfer error: {type(e).__name__}: {e}")
             return None
     
     async def _confirm_transfer(
         self,
-        client: AsyncHttpClient,
+        client: httpx.AsyncClient,
         user_agent: str,
         fhpsessionid: str,
         transfer_id: str
     ) -> Optional[Dict[str, Any]]:
-        headers = generate_headers(user_agent, fhpsessionid)
-        
-        payload = {
-            "transactionId": transfer_id,
-            "recordType": "transfer"
-        }
-        
-        response = await client.request(
-            "POST",
-            f"{self.API_BASE}/anonymous/multi/multitransfer-qr-processing/v3/anonymous/confirm",
-            headers=headers,
-            json=payload
-        )
-        
-        if response.status_code == 200:
-            return response.json()
-        
-        return None
+        try:
+            headers = generate_headers(user_agent, fhpsessionid)
+            
+            payload = {
+                "transactionId": transfer_id,
+                "recordType": "transfer"
+            }
+            
+            response = await client.request(
+                "POST",
+                f"{self.API_BASE}/anonymous/multi/multitransfer-qr-processing/v3/anonymous/confirm",
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            
+            print(f"[Race] Confirm transfer failed: {response.status_code}")
+            return None
+        except Exception as e:
+            print(f"[Race] _confirm_transfer error: {type(e).__name__}: {e}")
+            return None
 
 
 async def generate_qr_race(
