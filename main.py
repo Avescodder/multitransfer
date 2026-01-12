@@ -67,7 +67,7 @@ async def main():
         card_country = "TJK"
         attempts = 3
         
-        print(f"\n[Main] Starting QR generation:")
+        print("\n[Main] Starting QR generation:")
         print(f"  - Amount: {amount} RUB")
         print(f"  - Card: {card_number}")
         print(f"  - Country: {card_country}")
@@ -96,7 +96,7 @@ async def main():
             else:
                 print("QR Payload:   N/A")
         else:
-            print("FAILED - All attempts unsuccessful")
+            print("Failed - All attempts unsuccessful")
         
         final_pool_size = await token_pool.get_pool_size()
         print(f"\n[Main] Final token pool size: {final_pool_size}/{config.TOKEN_POOL_SIZE}")
@@ -107,10 +107,8 @@ async def main():
         traceback.print_exc()
     
     finally:
-        print("\n[Main] Shutting down...")
         await token_pool.stop_generator()
         await token_pool.disconnect()
-        print("[Main] Done")
 
 
 if __name__ == "__main__":

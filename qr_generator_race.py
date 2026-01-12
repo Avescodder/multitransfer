@@ -52,7 +52,7 @@ class QRGeneratorRace:
                 try:
                     result = task.result()
                     if result and result.get("transfer_id"):
-                        print(f"[Race] Success! Cancelling {len(pending)} remaining tasks")
+                        print(f"[Race] Cancelling {len(pending)} remaining tasks")
                         for pending_task in pending:
                             pending_task.cancel()
                         
@@ -95,7 +95,6 @@ class QRGeneratorRace:
         user_agent = random.choice(config.USER_AGENTS)
         fhpsessionid = str(uuid.uuid4())
         
-        # Создаем единый httpx клиент для всей попытки
         client = httpx.AsyncClient(
             proxy=self.proxy,
             follow_redirects=True,
@@ -128,7 +127,6 @@ class QRGeneratorRace:
             if self.success_event.is_set():
                 return None
             
-            # Получаем токен из пула или создаем новый
             captcha_token = None
             if self.token_pool:
                 captcha_token = await self.token_pool.get_token()
@@ -176,7 +174,7 @@ class QRGeneratorRace:
             if not self.success_event.is_set():
                 self.success_event.set()
                 self.winner_result = result
-                print(f"[Race] Attempt {attempt_num}: QR generated successfully ✓")
+                print(f"[Race] Attempt {attempt_num}: QR generated successfully")
             
             return result
         
@@ -229,7 +227,7 @@ class QRGeneratorRace:
             fees = data.get("fees", [])
             
             if not fees or not fees[0].get("commissions"):
-                print(f"[Race] No commissions found in response")
+                print("[Race] No commissions found in response")
                 return None
             
             commission = fees[0]["commissions"][0]

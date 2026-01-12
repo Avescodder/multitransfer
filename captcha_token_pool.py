@@ -1,9 +1,6 @@
 import asyncio
 import redis.asyncio as redis
 from typing import Optional
-import time
-
-from config import config
 from captcha_solver import solve_captcha
 
 
@@ -12,7 +9,7 @@ class CaptchaTokenPool:
         self,
         redis_url: str = "redis://localhost:6379",
         pool_size: int = 10,
-        token_lifetime: int = 300,
+        token_lifetime: int = 8,
         captcha_key: Optional[str] = None
     ):
         self.redis_url = redis_url
@@ -24,6 +21,8 @@ class CaptchaTokenPool:
         self.token_key_prefix = "captcha_token:"
         self.is_running = False
         self.generator_task: Optional[asyncio.Task] = None
+        
+        self.need_tokens_event = asyncio.Event()
     
     async def connect(self):
         self.redis_client = await redis.from_url(
@@ -45,7 +44,7 @@ class CaptchaTokenPool:
         
         self.is_running = True
         self.generator_task = asyncio.create_task(self._token_generator_loop())
-        print(f"[TokenPool] Started token generator (pool_size={self.pool_size})")
+        print(f"[TokenPool] Started token generator (pool_size={self.pool_size}, lifetime={self.token_lifetime}s)")
     
     async def stop_generator(self):
         self.is_running = False
@@ -58,14 +57,22 @@ class CaptchaTokenPool:
         print("[TokenPool] Stopped token generator")
     
     async def _token_generator_loop(self):
-        print("[TokenPool] Token generator loop started")
-        
         while self.is_running:
             try:
                 current_size = await self.get_pool_size()
                 
                 if current_size >= self.pool_size:
-                    await asyncio.sleep(5)
+                    print(f"[TokenPool] Pool full ({current_size}/{self.pool_size}), waiting for tokens to be used")
+                    
+                    try:
+                        await asyncio.wait_for(
+                            self.need_tokens_event.wait(),
+                            timeout=10.0
+                        )
+                    except asyncio.TimeoutError:
+                        pass 
+                    
+                    self.need_tokens_event.clear()
                     continue
                 
                 tokens_needed = self.pool_size - current_size
@@ -107,7 +114,7 @@ class CaptchaTokenPool:
                 "1"  
             )
             
-            print(f"[TokenPool] Token stored: {token[:20]}... (TTL: {self.token_lifetime}s)")
+            print(f"[TokenPool] Token stored: {token[:20]} (TTL: {self.token_lifetime}s)")
             return True
         
         except Exception as e:
@@ -132,7 +139,9 @@ class CaptchaTokenPool:
             await self.redis_client.delete(key)
             
             current_size = await self.get_pool_size()
-            print(f"[TokenPool] Token retrieved: {token[:20]} (pool size: {current_size})")
+            print(f"[TokenPool] Token retrieved: {token[:20]} (pool size: {current_size}/{self.pool_size})")
+            
+            self.need_tokens_event.set()
             
             return token
         
@@ -163,4 +172,3 @@ class CaptchaTokenPool:
                 print("[TokenPool] Pool already empty")
         except Exception as e:
             print(f"[TokenPool] Error clearing pool: {e}")
-
