@@ -1,11 +1,14 @@
 import asyncio
 import random
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
 from config import config
 from captcha_solver import solve_captcha
 from http_client import AsyncHttpClient, generate_headers
+
+if TYPE_CHECKING:
+    from captcha_token_pool import CaptchaTokenPool
 
 
 class QRGeneratorRace:
@@ -25,7 +28,7 @@ class QRGeneratorRace:
         self.card_number = card_number
         self.card_country = card_country
         self.attempts = attempts
-        self.token_pool = token_pool  
+        self.token_pool = token_pool
         
         self.success_event = asyncio.Event()
         self.winner_result = None
@@ -93,7 +96,6 @@ class QRGeneratorRace:
         fhpsessionid = str(uuid.uuid4())
         
         try:
-            # 1. Calc commissions
             if self.success_event.is_set():
                 return None
             
@@ -104,7 +106,6 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed at commissions")
                 return None
             
-            # 2. Get captcha key
             if self.success_event.is_set():
                 return None
             
@@ -113,7 +114,6 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed at captcha key")
                 return None
             
-            # 3. Solve captcha
             if self.success_event.is_set():
                 return None
             
@@ -135,7 +135,6 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed to get captcha token")
                 return None
             
-            # 4. Create transfer
             if self.success_event.is_set():
                 return None
             
@@ -148,7 +147,6 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed at transfer creation")
                 return None
             
-            # 5. Confirm transfer
             if self.success_event.is_set():
                 return None
             
@@ -335,30 +333,16 @@ async def generate_qr_race(
     amount: float,
     card_number: str,
     card_country: str = "TJK",
-    attempts: int = 3
+    attempts: int = 3,
+    token_pool: Optional['CaptchaTokenPool'] = None
 ) -> Optional[Dict[str, Any]]:
-    """
-    Генерация QR-кода с race-режимом
-    Args:
-        proxy: Прокси в формате http://user:pass@host:port
-        amount: Сумма перевода
-        card_number: Номер карты получателя
-        card_country: Код страны (TJK/UZB/KGZ)
-        attempts: Количество параллельных попыток (рекомендуется 3-5)
-    Returns:
-        {
-            "transfer_id": "...",
-            "transfer_num": "...",
-            "qr_payload": "https://qr.nspk.ru/..."
-        }
-        или None при неудаче
-    """
     generator = QRGeneratorRace(
         proxy=proxy,
         amount=amount,
         card_number=card_number,
         card_country=card_country,
-        attempts=attempts
+        attempts=attempts,
+        token_pool=token_pool
     )
     
     return await generator.generate()
