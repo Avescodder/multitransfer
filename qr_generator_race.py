@@ -17,13 +17,15 @@ class QRGeneratorRace:
         amount: float,
         card_number: str,
         card_country: str = "TJK",
-        attempts: int = 3
+        attempts: int = 3,
+        token_pool: Optional['CaptchaTokenPool'] = None
     ):
         self.proxy = proxy
         self.amount = amount
         self.card_number = card_number
         self.card_country = card_country
         self.attempts = attempts
+        self.token_pool = token_pool  
         
         self.success_event = asyncio.Event()
         self.winner_result = None
@@ -111,20 +113,26 @@ class QRGeneratorRace:
                 print(f"[Race] Attempt {attempt_num}: Failed at captcha key")
                 return None
             
-            # 3. Solve captcha (может быть отменена)
+            # 3. Solve captcha
             if self.success_event.is_set():
                 return None
             
-            print(f"[Race] Attempt {attempt_num}: Solving captcha")
-            
-            try:
-                captcha_token = await solve_captcha(captcha_key, priority=10)
-            except asyncio.CancelledError:
-                print(f"[Race] Attempt {attempt_num}: Cancelled during captcha")
-                raise
+            captcha_token = None
+            if self.token_pool:
+                captcha_token = await self.token_pool.get_token()
+                if captcha_token:
+                    print(f"[Race] Attempt {attempt_num}: Using token from pool")
             
             if not captcha_token:
-                print(f"[Race] Attempt {attempt_num}: Failed at captcha solve")
+                print(f"[Race] Attempt {attempt_num}: Solving captcha (no token in pool)")
+                try:
+                    captcha_token = await solve_captcha(captcha_key, priority=10)
+                except asyncio.CancelledError:
+                    print(f"[Race] Attempt {attempt_num}: Cancelled during captcha")
+                    raise
+            
+            if not captcha_token:
+                print(f"[Race] Attempt {attempt_num}: Failed to get captcha token")
                 return None
             
             # 4. Create transfer

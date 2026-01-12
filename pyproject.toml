@@ -9,4 +9,5 @@ dependencies = [
     "dotenv>=0.9.9",
     "httpx>=0.28.1",
     "playwright>=1.57.0",
+    "redis>=7.1.0",
 ]

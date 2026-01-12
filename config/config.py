@@ -54,6 +54,9 @@ PASSPORT_DATES = [
     {"date_birth": "1999-12-09T00:00:00", "date_issue": "2023-03-26T00:00:00"},
 ]
 
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
+TOKEN_POOL_SIZE = int(os.getenv('TOKEN_POOL_SIZE', '10'))
+TOKEN_LIFETIME = int(os.getenv('TOKEN_LIFETIME', '300'))
 
 def random_series() -> str:
     return f"{random.randint(10, 99)}{random.randint(10, 99)}"
