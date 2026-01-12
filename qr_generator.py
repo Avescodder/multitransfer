@@ -144,7 +144,7 @@ class QRGenerator:
         captcha_token: str
     ) -> Optional[Dict[str, Any]]:
         country_data = config.CARD_COUNTRIES[card_country]
-        passport_dates = random.choice(config.DATES_PASSPORT)
+        passport_dates = random.choice(config.PASSPORT_DATES)
         
         headers = generate_headers(self.user_agent, self.fhpsessionid)
         headers["Fhptokenid"] = captcha_token
