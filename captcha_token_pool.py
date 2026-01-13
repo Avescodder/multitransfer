@@ -1,6 +1,8 @@
 import asyncio
 import redis.asyncio as redis
 from typing import Optional
+import time  
+
 from captcha_solver import solve_captcha
 
 
@@ -8,17 +10,20 @@ class CaptchaTokenPool:
     def __init__(
         self,
         redis_url: str = "redis://localhost:6379",
-        pool_size: int = 10,
-        token_lifetime: int = 8,
+        pool_size: int = 5,
+        token_lifetime: int = 48,
+        token_min_age: int = 10,  
         captcha_key: Optional[str] = None
     ):
         self.redis_url = redis_url
         self.pool_size = pool_size
         self.token_lifetime = token_lifetime
+        self.token_min_age = token_min_age  
         self.captcha_key = captcha_key
         
         self.redis_client: Optional[redis.Redis] = None
         self.token_key_prefix = "captcha_token:"
+        self.token_meta_prefix = "captcha_meta:"  
         self.is_running = False
         self.generator_task: Optional[asyncio.Task] = None
         
@@ -58,7 +63,10 @@ class CaptchaTokenPool:
         
         self.is_running = True
         self.generator_task = asyncio.create_task(self._token_generator_loop())
-        print(f"[TokenPool] Started token generator (pool_size={self.pool_size}, lifetime={self.token_lifetime}s)")
+        print("[TokenPool] Started token generator")
+        print(f"  - Pool size: {self.pool_size}")
+        print(f"  - Lifetime: {self.token_lifetime}s")
+        print(f"  - Min age: {self.token_min_age}s (tokens 'mature' before use)")
     
     async def stop_generator(self):
         self.is_running = False
@@ -79,7 +87,7 @@ class CaptchaTokenPool:
                 current_size = await self.get_pool_size()
                 
                 if current_size >= self.pool_size:
-                    print(f"[TokenPool] Pool full ({current_size}/{self.pool_size}), waiting for tokens to be used")
+                    print(f"[TokenPool] Pool full ({current_size}/{self.pool_size}), waiting...")
                     
                     try:
                         await asyncio.wait_for(
@@ -137,14 +145,22 @@ class CaptchaTokenPool:
             if not token:
                 return False
             
-            key = f"{self.token_key_prefix}{token}"
+            token_key = f"{self.token_key_prefix}{token}"
             await self.redis_client.setex(
-                key,
+                token_key,
                 self.token_lifetime,
                 "1"
             )
             
-            print(f"[TokenPool] Token stored: {token[:20]} (TTL: {self.token_lifetime}s)")
+            meta_key = f"{self.token_meta_prefix}{token}"
+            created_at = int(time.time())
+            await self.redis_client.setex(
+                meta_key,
+                self.token_lifetime,
+                str(created_at)
+            )
+            
+            print(f"[TokenPool] Token stored: {token[:20]}... (TTL: {self.token_lifetime}s)")
             return True
         
         except redis.ConnectionError as e:
@@ -156,48 +172,48 @@ class CaptchaTokenPool:
     
     async def get_token(self) -> Optional[str]:
         try:
-            keys = []
-            async for key in self.redis_client.scan_iter(f"{self.token_key_prefix}*", count=10):
+            current_time = int(time.time())
+            
+            async for key in self.redis_client.scan_iter(f"{self.token_key_prefix}*", count=100):
+                token = key.replace(self.token_key_prefix, "")
+                
                 ttl = await self.redis_client.ttl(key)
-                if ttl > 1:  
-                    keys.append(key)
-                    break
-                else:
+                if ttl <= 1:
                     await self.redis_client.delete(key)
+                    continue
+                
+                meta_key = f"{self.token_meta_prefix}{token}"
+                created_at_str = await self.redis_client.get(meta_key)
+                
+                if created_at_str:
+                    created_at = int(created_at_str)
+                    age = current_time - created_at
+                    
+                    if age < self.token_min_age:
+                        print(f"[TokenPool] Token too young: {age}s < {self.token_min_age}s, skipping...")
+                        continue
+                    
+                    print(f"[TokenPool] Token age: {age}s (>= {self.token_min_age}s) ✓")
+                
+                await self.redis_client.delete(key)
+                await self.redis_client.delete(meta_key)
+                
+                current_size = await self.get_pool_size()
+                print(f"[TokenPool] Token retrieved: {token[:20]}... (pool: {current_size}/{self.pool_size})")
+                
+                self.need_tokens_event.set()
+                
+                return token
             
-            if not keys:
-                print("[TokenPool] No valid tokens available in pool")
-                return None
-            
-            key = keys[0]
-            token = key.replace(self.token_key_prefix, "")
-            
-            await self.redis_client.delete(key)
-            
-            current_size = await self.get_pool_size()
-            print(f"[TokenPool] Token retrieved: {token[:20]} (pool size: {current_size}/{self.pool_size})")
-            
-            self.need_tokens_event.set()
-            
-            return token
+            print("[TokenPool] No mature tokens available (all too young or expired)")
+            return None
         
         except redis.ConnectionError as e:
-            print(f"[TokenPool] ✗ Redis error getting token: {e}")
+            print(f"[TokenPool] Redis error getting token: {e}")
             return None
         except Exception as e:
             print(f"[TokenPool] Error getting token: {e}")
             return None
-    
-    async def return_token(self, token: str) -> bool:
-        try:
-            key = f"{self.token_key_prefix}{token}"
-            ttl = max(self.token_lifetime // 2, 3)
-            await self.redis_client.setex(key, ttl, "1")
-            print(f"[TokenPool] Token returned: {token[:20]} (TTL: {ttl}s)")
-            return True
-        except Exception as e:
-            print(f"[TokenPool] Error returning token: {e}")
-            return False
     
     async def get_pool_size(self) -> int:
         try:
@@ -213,10 +229,22 @@ class CaptchaTokenPool:
         try:
             size = await self.get_pool_size()
             tokens_info = []
+            current_time = int(time.time())
             
             async for key in self.redis_client.scan_iter(f"{self.token_key_prefix}*", count=100):
+                token = key.replace(self.token_key_prefix, "")
                 ttl = await self.redis_client.ttl(key)
-                tokens_info.append({"key": key, "ttl": ttl})
+                
+                meta_key = f"{self.token_meta_prefix}{token}"
+                created_at_str = await self.redis_client.get(meta_key)
+                age = current_time - int(created_at_str) if created_at_str else 0
+                
+                tokens_info.append({
+                    "token": token[:20] + "...",
+                    "ttl": ttl,
+                    "age": age,
+                    "mature": age >= self.token_min_age
+                })
             
             return {
                 "size": size,
@@ -233,10 +261,12 @@ class CaptchaTokenPool:
             keys = []
             async for key in self.redis_client.scan_iter(f"{self.token_key_prefix}*"):
                 keys.append(key)
+            async for key in self.redis_client.scan_iter(f"{self.token_meta_prefix}*"):
+                keys.append(key)
             
             if keys:
                 await self.redis_client.delete(*keys)
-                print(f"[TokenPool] Cleared {len(keys)} tokens from pool")
+                print(f"[TokenPool] Cleared {len(keys)} items from pool")
             else:
                 print("[TokenPool] Pool already empty")
         except Exception as e:
