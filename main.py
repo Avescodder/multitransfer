@@ -44,6 +44,7 @@ async def main():
         redis_url=config.REDIS_URL,
         pool_size=config.TOKEN_POOL_SIZE,
         token_lifetime=config.TOKEN_LIFETIME,
+        token_min_age=config.TOKEN_MIN_AGE,
         captcha_key=captcha_key
     )
     
@@ -54,7 +55,7 @@ async def main():
         
         await token_pool.start_generator()
         
-        wait_time = 15
+        wait_time = 18
         print(f"[Main] Waiting {wait_time}s for tokens to generate")
         await asyncio.sleep(wait_time)
         

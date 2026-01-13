@@ -55,9 +55,9 @@ PASSPORT_DATES = [
 ]
 
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
-TOKEN_POOL_SIZE = int(os.getenv('TOKEN_POOL_SIZE', '5'))
-TOKEN_LIFETIME = int(os.getenv('TOKEN_LIFETIME', '48'))
-TOKEN_MIN_AGE = int(os.getenv('TOKEN_MIN_AGE', '10'))      
+TOKEN_POOL_SIZE = int(os.getenv('TOKEN_POOL_SIZE', '10'))
+TOKEN_LIFETIME = int(os.getenv('TOKEN_LIFETIME', '90'))
+TOKEN_MIN_AGE = int(os.getenv('TOKEN_MIN_AGE', '3'))      
 
 
 def random_series() -> str:

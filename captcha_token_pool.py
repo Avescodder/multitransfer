@@ -12,7 +12,7 @@ class CaptchaTokenPool:
         redis_url: str = "redis://localhost:6379",
         pool_size: int = 5,
         token_lifetime: int = 48,
-        token_min_age: int = 10,  
+        token_min_age: int = 3,  
         captcha_key: Optional[str] = None
     ):
         self.redis_url = redis_url
